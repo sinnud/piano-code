@@ -10,11 +10,11 @@ A comprehensive Python piano simulation application with multiple interfaces for
 - **GUI Mode** - Visual Mac keyboard layout with clickable keys
 
 🎼 **Audio System** 
-- PyAudio-based sound generation with multiple waveforms
+- PyAudio-based sound generation with realistic instrument sounds
 - 3-octave note system (low, base, high) using solfege notation
 - Chord playing capability
 - Configurable basetones (C, D, E, F, G, A, B with sharps)
-- 4 waveform types: sine, square, triangle, sawtooth
+- 4 instrument types: Piano, Guitar, Saxophone, Violin
 
 🖥️ **Visual Interface**
 - Complete Mac keyboard layout visualization
@@ -32,7 +32,10 @@ piano_code/
 │   ├── piano_gui.py         # GUI interface with Mac keyboard layout
 │   └── __init__.py
 ├── config/
-│   └── keyboard_layout.json # Key mappings configuration
+│   ├── keyboard_layout.json # Default key mappings configuration
+│   ├── a_as_la_layout.json  # Alternative layout with 'a' as low la (.6)
+│   ├── a_as_mi_layout.json  # Alternative layout with 'a' as low mi (.3)
+│   └── a_as_so_layout.json  # Alternative layout with 'a' as low sol (.5)
 ├── test/
 │   ├── test_piano_sound.py  # Unit tests for audio system
 │   ├── key_ord_test.py      # Utility for testing keyboard input
@@ -104,7 +107,7 @@ h→1(C4)   j→2(D4)   k→3(E4)   l→5(G4)   ;→6(A4)
 from code.piano_sound import PianoSound
 
 # Create piano instance
-piano = PianoSound(duration=1.0, waveform='sine', basetone='C')
+piano = PianoSound(duration=1.0, instrument='piano', basetone='C')
 
 # Play single notes
 piano.play_note('1')      # Play C4 (do)
@@ -116,18 +119,33 @@ piano.play_chord(['1', '3', '5'])  # C major chord
 
 # Change settings
 piano.set_basetone('D')   # Change to D major
-piano.set_waveform('square')  # Change waveform
+piano.set_instrument('guitar')  # Change instrument
 
 # Play frequencies directly
 piano.play_frequency(440)  # Play A4
+
+# Cleanup when done
+piano.close()
 ```
 
 ## Configuration
 
-Edit `config/keyboard_layout.json` to customize:
-- Key mappings
-- Default basetone
-- Control key assignments
+The `config/` directory contains multiple keyboard layout options:
+
+### Available Layouts
+- **`keyboard_layout.json`** - Default layout with standard key mappings
+- **`a_as_la_layout.json`** - Alternative layout with 'a' key mapped to low la (.6)
+- **`a_as_mi_layout.json`** - Alternative layout with 'a' key mapped to low mi (.3)  
+- **`a_as_so_layout.json`** - Alternative layout with 'a' key mapped to low sol (.5)
+
+### Customization Options
+Each layout file can be customized to modify:
+- Key mappings to musical notes
+- Default basetone (C, D, E, F, G, A, B)
+- Control key assignments (volume, instrument changes, etc.)
+
+### Switching Layouts
+Use the `3` key during runtime to cycle through available layouts, or modify the layout loading in `main.py` to set a different default.
 
 ## Testing
 
@@ -151,10 +169,16 @@ python test/key_ord_test.py
 - **Key mappings**: Configure `config/keyboard_layout.json`
 - **Add tests**: Create test files in `test/`
 
+## Cross-Platform Support
+
+- **macOS**: Full support (recommended)
+- **Linux/Debian**: Supported with recent fixes for GUI key handling
+- **Windows**: Basic support (GUI and terminal modes)
+
 ## Requirements
 
 - Python 3.7+
 - NumPy 1.20.0+
 - PyAudio 0.2.11+
-- macOS (for audio output)
+- Cross-platform audio support via PyAudio
 - Tkinter (for GUI mode, usually included with Python)

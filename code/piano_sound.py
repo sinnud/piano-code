@@ -2,16 +2,23 @@ import json
 import numpy as np
 import pyaudio
 import threading
+import logging
 from typing import Optional
+from .config import Audio, Music, config_manager
 
 
 class PianoSound:
-    def __init__(self, sample_rate: int = 44100, duration: float = 1.0, blocking: bool = True, instrument: str = 'piano', basetone: str = 'C'):
-        self.sample_rate = sample_rate
-        self.duration = duration
+    def __init__(self, sample_rate: int = 44100, duration: float = 1.0, blocking: bool = True, instrument: str = 'piano', basetone: str = 'C', volume: float = 0.7):
+        # Use config defaults with user preference fallbacks
+        self.sample_rate = sample_rate or Audio.DEFAULT_SAMPLE_RATE
+        self.duration = duration or Audio.DEFAULT_DURATION
         self.blocking = blocking
-        self.instrument = instrument
-        self.basetone = basetone
+        self.instrument = instrument or config_manager.get_user_preference('instrument', Music.DEFAULT_INSTRUMENT)
+        self.basetone = basetone or config_manager.get_user_preference('basetone', Music.DEFAULT_BASETONE)
+        self.volume = volume or config_manager.get_user_preference('volume', Audio.DEFAULT_VOLUME)
+        
+        # Set up logging
+        self.logger = logging.getLogger(__name__)
         self.audio = None
         self.stream = None
         self.is_playing = False
@@ -27,21 +34,8 @@ class PianoSound:
         if self.basetone not in ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']:
             raise ValueError(f"Invalid basetone: {self.basetone}")
         
-        # Base frequencies for each note (4th octave)
-        self.base_frequencies = {
-            'C': 261.63,   # C4
-            'C#': 277.18,  # C#4
-            'D': 293.66,   # D4
-            'D#': 311.13,  # D#4
-            'E': 329.63,   # E4
-            'F': 349.23,   # F4
-            'F#': 369.99,  # F#4
-            'G': 392.00,   # G4
-            'G#': 415.30,  # G#4
-            'A': 440.00,   # A4
-            'A#': 466.16,  # A#4
-            'B': 493.88,   # B4
-        }
+        # Base frequencies from config
+        self.base_frequencies = Music.BASE_FREQUENCIES
         
         # Note to semitones mapping (expanded to 3 octaves) - all strings
         self.note_to_semitones = {
@@ -156,6 +150,7 @@ class PianoSound:
     
     def _pregenerate_waveforms(self):
         """Pre-generate instrument sounds for all notes and basetones for instant playback."""
+        self.logger.info("Starting waveform pre-generation for instant playback")
         print("🎼 Pre-generating instrument sounds for instant playback...")
         
         # Generate for all basetones and all notes
@@ -173,6 +168,7 @@ class PianoSound:
                     self.instrument_cache[basetone][note][instrument] = instrument_data
         
         total_cached = len(self.base_frequencies) * len(self.note_to_semitones) * len(self.instruments)
+        self.logger.info(f"Cached {total_cached} instrument sounds ({len(self.base_frequencies)} basetones × {len(self.note_to_semitones)} notes × {len(self.instruments)} instruments)")
         print(f"✅ Cached {total_cached} instrument sounds ({len(self.base_frequencies)} basetones × {len(self.note_to_semitones)} notes × {len(self.instruments)} instruments)")
     
     def _generate_tone_internal(self, frequency: float, duration: float, instrument: str) -> np.ndarray:
@@ -247,9 +243,9 @@ class PianoSound:
         # Apply envelope
         wave = wave * envelope
         
-        # Normalize to prevent clipping
+        # Apply volume and normalize to prevent clipping
         if np.max(np.abs(wave)) > 0:
-            wave = wave / np.max(np.abs(wave)) * 0.5
+            wave = wave / np.max(np.abs(wave)) * 0.5 * self.volume
         
         return wave.astype(np.float32)
     
@@ -261,13 +257,50 @@ class PianoSound:
         """Set instrument for audio generation."""
         if instrument not in self.instruments:
             raise ValueError(f"Invalid instrument: {instrument}. Choose from {self.instruments}")
+        
+        old_instrument = self.instrument
         self.instrument = instrument
+        
+        # Save user preference
+        config_manager.set_user_preference('instrument', instrument)
+        self.logger.info(f"Instrument changed from {old_instrument} to {instrument}")
     
     def set_basetone(self, basetone: str):
         """Set base tone for note calculations."""
         if basetone not in self.base_frequencies:
             raise ValueError(f"Invalid basetone: {basetone}. Choose from {list(self.base_frequencies.keys())}")
+        
+        old_basetone = self.basetone
         self.basetone = basetone
+        
+        # Save user preference
+        config_manager.set_user_preference('basetone', basetone)
+        self.logger.info(f"Basetone changed from {old_basetone} to {basetone}")
+    
+    def set_volume(self, volume: float):
+        """Set master volume (0.0 to 1.0)."""
+        if not (Audio.MIN_VOLUME <= volume <= Audio.MAX_VOLUME):
+            raise ValueError(f"Volume must be between {Audio.MIN_VOLUME} and {Audio.MAX_VOLUME}")
+        
+        old_volume = self.volume
+        self.volume = volume
+        
+        # Save user preference
+        config_manager.set_user_preference('volume', volume)
+        self.logger.info(f"Volume changed from {old_volume:.2f} to {volume:.2f}")
+    
+    def adjust_volume(self, delta: float):
+        """Adjust volume by delta amount."""
+        new_volume = max(Audio.MIN_VOLUME, min(Audio.MAX_VOLUME, self.volume + delta))
+        self.set_volume(new_volume)
+    
+    def volume_up(self):
+        """Increase volume by one step."""
+        self.adjust_volume(Audio.VOLUME_STEP)
+    
+    def volume_down(self):
+        """Decrease volume by one step."""
+        self.adjust_volume(-Audio.VOLUME_STEP)
     
     def get_settings(self):
         """Get current piano settings."""
@@ -277,6 +310,7 @@ class PianoSound:
             'blocking': self.blocking,
             'instrument': self.instrument,
             'basetone': self.basetone,
+            'volume': self.volume,
             'is_playing': self.is_playing
         }
         
@@ -325,6 +359,7 @@ class PianoSound:
     def play_frequency(self, frequency: float, duration: float = None):
         """Play a frequency with improved error handling."""
         if not self._ensure_audio():
+            self.logger.warning("Audio system not available for frequency playback")
             print("⚠️  Audio system not available")
             return
             
@@ -442,8 +477,11 @@ class PianoSound:
             raise ValueError(f"Invalid note: {note}. Choose from {list(self.note_to_semitones.keys())}")
         
         if not self._ensure_audio():
+            self.logger.warning(f"Audio system not available for note {note}")
             print("⚠️  Audio system not available")
             return
+            
+        self.logger.debug(f"Playing note: {note} (duration: {duration or self.duration}s, instrument: {self.instrument})")
             
         # Always stop current playback first
         self.stop()
@@ -479,8 +517,11 @@ class PianoSound:
             raise ValueError("Cannot play empty chord")
         
         if not self._ensure_audio():
+            self.logger.warning(f"Audio system not available for chord {notes}")
             print("⚠️  Audio system not available")
             return
+            
+        self.logger.debug(f"Playing chord: {notes} (duration: {duration or self.duration}s, instrument: {self.instrument})")
             
         # Always stop current playback first
         self.stop()
@@ -662,22 +703,38 @@ class PianoSound:
     def regenerate_instrument_cache(self, instrument: str = None):
         """Regenerate instrument cache for updated sound algorithms."""
         if instrument is None:
-            # Regenerate all instruments
-            print("🎼 Regenerating all instrument sounds...")
-            self._pregenerate_waveforms()
+            # Clear all caches and regenerate current combination
+            print("🎼 Clearing all caches and regenerating current settings...")
+            self.instrument_cache.clear()
+            self.waveform_lru_cache.clear()
+            self.cache_access_order.clear()
+            self._pregenerate_current_combination()
+            self._start_background_generation()
         else:
-            # Regenerate specific instrument
+            # Regenerate specific instrument for current basetone
             if instrument not in self.instruments:
                 raise ValueError(f"Invalid instrument: {instrument}")
             
-            print(f"🎷 Regenerating {instrument} sounds...")
-            for basetone in self.base_frequencies.keys():
-                base_freq = self.base_frequencies[basetone]
-                for note, semitones in self.note_to_semitones.items():
-                    frequency = base_freq * (2 ** (semitones / 12))
-                    instrument_data = self._generate_tone_internal(frequency, self.duration, instrument)
-                    self.instrument_cache[basetone][note][instrument] = instrument_data
+            print(f"🎷 Regenerating {instrument} for {self.basetone}...")
             
+            # Clear from main cache
+            if (self.basetone in self.instrument_cache and 
+                any(instrument in self.instrument_cache[self.basetone].get(note, {}) 
+                   for note in self.note_to_semitones.keys())):
+                for note in self.note_to_semitones.keys():
+                    if note in self.instrument_cache[self.basetone]:
+                        self.instrument_cache[self.basetone][note].pop(instrument, None)
+            
+            # Clear from LRU cache
+            keys_to_remove = [key for key in self.waveform_lru_cache.keys() 
+                            if key[0] == self.basetone and key[2] == instrument]
+            for key in keys_to_remove:
+                self.waveform_lru_cache.pop(key, None)
+                if key in self.cache_access_order:
+                    self.cache_access_order.remove(key)
+            
+            # Regenerate
+            self._pregenerate_basetone_instrument(self.basetone, instrument)
             print(f"✅ {instrument.title()} sounds updated!")
     
     def __del__(self):

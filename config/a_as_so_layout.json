@@ -1,0 +1,31 @@
+{
+  "title": "Sol Based Piano Keyboard Layout",
+  "description": "Maps keyboard keys to musical notes with 'a' as low sol (.5)",
+  "basetone": "C",
+  "key_mappings": {
+    "a": ".5", "w": ".#5",
+    "s": ".6", "e": ".7",
+    "d": "1", "x": ".#6", "r": "#1",
+    "f": "2", "t": "#2",
+    "g": "3", "y": "4", "b": "#4",
+    "h": "5", "u": "#5",
+    "j": "6", "i": "7",
+    "k": "^1", "m": "#6", "o": "^#1",
+    "l": "^2", "p": "^#2",
+    ";": "^3", "[": "^4", "/": "^#4",
+    "'": "^5",
+    "]": "^6",
+    "\\": "^7"
+  },
+  "controls": {
+    "space": "stop",
+    "esc": "quit",
+    "1": "change_basetone",
+    "2": "change_instrument",
+    "3": "change_layout",
+    "+": "volume_up",
+    "=": "volume_up",
+    "-": "volume_down",
+    "_": "volume_down"
+  }
+}

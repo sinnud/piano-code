@@ -2,7 +2,9 @@ import json
 import os
 import sys
 import glob
+import logging
 from .piano_sound import PianoSound
+from .config import config_manager
 
 
 class KeyboardInterface:
@@ -13,7 +15,14 @@ class KeyboardInterface:
         
         self.config_path = config_path
         self.config_dir = os.path.dirname(config_path)
-        self.piano = PianoSound(duration=1.0, blocking=False, instrument='piano', basetone='C')  # Keyboard settings
+        self.logger = logging.getLogger(__name__)
+        
+        # Initialize piano with saved user preferences
+        saved_instrument = config_manager.get_user_preference('instrument', 'piano')
+        saved_basetone = config_manager.get_user_preference('basetone', 'C')
+        saved_volume = config_manager.get_user_preference('volume', 0.7)
+        self.piano = PianoSound(duration=1.0, blocking=False, 
+                               instrument=saved_instrument, basetone=saved_basetone, volume=saved_volume)
         self.key_mappings = {}
         self.controls = {}
         self.current_layout = {}
@@ -25,6 +34,8 @@ class KeyboardInterface:
         
         # Load initial layout
         self.load_config()
+        
+        self.logger.info("Keyboard interface initialized successfully")
         
     def _discover_layouts(self):
         """Discover all available keyboard layout JSON files."""
@@ -124,6 +135,10 @@ class KeyboardInterface:
                 print(f"  {key:6} → Cycle instrument (Piano, Guitar, Saxophone, Violin)")
             elif action == "change_layout":
                 print(f"  {key:6} → Cycle keyboard layout")
+            elif action == "volume_up":
+                print(f"  {key:6} → Increase volume")
+            elif action == "volume_down":
+                print(f"  {key:6} → Decrease volume")
             else:
                 print(f"  {key:6} → {action}")
         
@@ -184,11 +199,14 @@ class KeyboardInterface:
         """Play sound for the given keyboard key."""
         if key in self.key_mappings:
             note = self.key_mappings[key]
+            self.logger.debug(f"Key pressed: {key} -> note {note}")
             try:
                 self.piano.play_note(note, duration=1.0)
             except Exception as e:
+                self.logger.error(f"Audio error for key {key} -> note {note}: {e}")
                 print(f"⚠️  Audio error for {note}: {e}")
         else:
+            self.logger.debug(f"Unmapped key pressed: {key}")
             print(f"⚠️  Key '{key}' not mapped")
     
     def stop_sound(self):
@@ -199,6 +217,7 @@ class KeyboardInterface:
     def change_basetone(self):
         """Interactive basetone change."""
         available_tones = list(self.piano.base_frequencies.keys())
+        self.logger.debug(f"Interactive basetone change started (current: {self.piano.basetone})")
         print(f"\n🎼 Current basetone: {self.piano.basetone}")
         print(f"Available tones: {', '.join(available_tones)}")
         print("Type new basetone and press Enter (or Esc to cancel):")
@@ -259,6 +278,7 @@ class KeyboardInterface:
         next_index = (current_index + 1) % len(self.piano.instruments)
         new_instrument = self.piano.instruments[next_index]
         
+        self.logger.info(f"Cycling instrument from {self.piano.instrument} to {new_instrument}")
         self.piano.set_instrument(new_instrument)
         
         # Choose appropriate emoji for instrument
@@ -279,6 +299,7 @@ class KeyboardInterface:
     def change_layout(self):
         """Cycle through available keyboard layouts."""
         if len(self.available_layouts) <= 1:
+            self.logger.debug("Layout change requested but only one layout available")
             print("⚠️  Only one layout available")
             return
             
@@ -288,6 +309,7 @@ class KeyboardInterface:
         
         try:
             # Load the new layout
+            self.logger.info(f"Changing layout to: {next_layout['title']}")
             self.load_config(next_layout['path'])
             print(f"✨ Layout changed to: {next_layout['title']}")
             
@@ -295,6 +317,7 @@ class KeyboardInterface:
             self._show_layout_cycle()
             
         except Exception as e:
+            self.logger.error(f"Error changing layout to {next_layout['title']}: {e}")
             print(f"❌ Error changing layout: {e}")
             # Revert to previous layout
             self.current_layout_index = (self.current_layout_index - 1) % len(self.available_layouts)
@@ -401,6 +424,10 @@ class KeyboardInterface:
                         self.change_instrument()
                     elif action == 'change_layout':
                         self.change_layout()
+                    elif action == 'volume_up':
+                        self.volume_up()
+                    elif action == 'volume_down':
+                        self.volume_down()
                 elif len(user_input) == 1:
                     self.play_key(user_input)
                 else:
@@ -415,6 +442,9 @@ class KeyboardInterface:
             print("\n\n👋 Goodbye!")
         except EOFError:
             print("\n\n👋 Goodbye!")
+        finally:
+            # Ensure proper cleanup of audio resources
+            self.piano.close()
     
     def run_realtime_input(self):
         """Run keyboard interface with real-time key detection."""
@@ -424,7 +454,7 @@ class KeyboardInterface:
         # Show initial help to user
         print("\n📝 Keyboard Layout:")
         self._print_keyboard_layout()
-        print("\n🔑 Control Keys: 1=Basetone | 2=Instrument | 3=Layout | SPACE=Stop | ESC=Quit")
+        print("\n🔑 Control Keys: 1=Basetone | 2=Instrument | 3=Layout | +=Volume Up | -=Volume Down | SPACE=Stop | ESC=Quit")
         print("\n🎵 Ready! Press piano keys to play...")
         
         try:
@@ -479,6 +509,10 @@ class KeyboardInterface:
                             print("\n📝 New Keyboard Layout:")
                             self._print_keyboard_layout()
                             print("\n🎵 Back to playing mode. Press keys to play!")
+                        elif action == 'volume_up':
+                            self.volume_up()
+                        elif action == 'volume_down':
+                            self.volume_down()
                         elif action == 'stop':
                             self.stop_sound()
                         elif action == 'quit':
@@ -510,6 +544,9 @@ class KeyboardInterface:
             print(f"❌ Error in real-time mode: {e}")
             print("Falling back to simple input mode...")
             self.run_simple_input()
+        finally:
+            # Ensure proper cleanup of audio resources
+            self.piano.close()
 
 
 def main():

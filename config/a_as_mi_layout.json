@@ -1,6 +1,6 @@
 {
-  "title": "A as Mi Piano Keyboard Layout",
-  "description": "Maps keyboard keys to musical notes",
+  "title": "Mi Based Piano Keyboard Layout",
+  "description": "Maps keyboard keys to musical notes with 'a' as low sol (.3)",
   "basetone": "C",
   "key_mappings": {
     "a": ".3", "w": ".4", "z": ".#4",
@@ -22,6 +22,10 @@
     "esc": "quit",
     "1": "change_basetone",
     "2": "change_instrument",
-    "3": "change_layout"
+    "3": "change_layout",
+    "+": "volume_up",
+    "=": "volume_up",
+    "-": "volume_down",
+    "_": "volume_down"
   }
 }

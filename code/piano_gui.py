@@ -13,7 +13,9 @@ import json
 import os
 import sys
 import glob
+import logging
 from .piano_sound import PianoSound
+from .config import Audio, GUI, Music, config_manager
 
 
 class PianoGUI:
@@ -40,11 +42,18 @@ class PianoGUI:
         """Initialize the piano GUI."""
         self.root = tk.Tk()
         self.root.title("🎹 Piano Code - GUI Mode")
-        self.root.geometry("900x650")  # Slightly taller for new controls
+        self.root.geometry(GUI.DEFAULT_WINDOW_SIZE)
         self.root.resizable(True, True)
         
-        # Initialize piano sound system
-        self.piano = PianoSound(duration=0.8, blocking=False, instrument='piano', basetone='C')
+        # Set up logging
+        self.logger = logging.getLogger(__name__)
+        
+        # Initialize piano sound system with user preferences
+        saved_instrument = config_manager.get_user_preference('instrument', Music.DEFAULT_INSTRUMENT)
+        saved_basetone = config_manager.get_user_preference('basetone', Music.DEFAULT_BASETONE)
+        saved_volume = config_manager.get_user_preference('volume', Audio.DEFAULT_VOLUME)
+        self.piano = PianoSound(duration=Audio.GUI_DURATION, blocking=False, 
+                               instrument=saved_instrument, basetone=saved_basetone, volume=saved_volume)
         
         # Layout management
         self.key_mappings = {}
@@ -59,9 +68,13 @@ class PianoGUI:
         # Load keyboard configuration
         self.load_config()
         
+        self.logger.info("Piano GUI initialized successfully")
+        
         # Track active keys for visual feedback
         self.active_keys = set()
         self.highlighted_keys = set()  # Track keys currently highlighted
+        self.key_timers = {}  # Track cleanup timers for each key
+        self.key_cleanup_delay = 1000  # ms - cleanup delay for stuck keys
         
         # Create GUI components
         self.create_widgets()
@@ -165,7 +178,7 @@ class PianoGUI:
         """Create control panel with settings."""
         control_frame = tk.LabelFrame(parent, text="Controls", font=("Arial", 11, "bold"), padx=10, pady=8)
         control_frame.grid(row=1, column=0, sticky="ew", pady=(0, 10))
-        control_frame.columnconfigure(7, weight=1)  # Make status expand (adjusted for basetone display)
+        control_frame.columnconfigure(8, weight=1)  # Make status expand (adjusted for volume control)
         
         # Layout selection (first row)
         tk.Label(control_frame, text="Layout:", font=("Arial", 9)).grid(row=0, column=0, padx=(0, 5), sticky="w")
@@ -215,15 +228,29 @@ class PianoGUI:
         instrument_combo.bind('<<ComboboxSelected>>', self.on_instrument_change)
         instrument_combo.grid(row=1, column=4, padx=(0, 15))
         
-        # Stop button (second row)
+        # Volume control (second row)
+        tk.Label(control_frame, text="Volume:", font=("Arial", 9)).grid(row=1, column=5, padx=(0, 5), sticky="w")
+        self.volume_var = tk.DoubleVar(value=self.piano.volume)
+        volume_scale = tk.Scale(control_frame, from_=Audio.MIN_VOLUME, to=Audio.MAX_VOLUME, 
+                               resolution=Audio.VOLUME_STEP, orient=tk.HORIZONTAL, 
+                               variable=self.volume_var, command=self.on_volume_change, length=100)
+        volume_scale.grid(row=1, column=6, padx=(0, 10), sticky="w")
+        
+        # Volume display
+        self.volume_display_var = tk.StringVar(value=f"{self.piano.volume:.0%}")
+        volume_display_label = tk.Label(control_frame, textvariable=self.volume_display_var, 
+                                        font=("Arial", 8), fg="darkblue", width=4)
+        volume_display_label.grid(row=1, column=7, padx=(0, 15), sticky="w")
+        
+        # Stop button (third row)
         stop_btn = tk.Button(control_frame, text="⏹ Stop", command=self.stop_all,
                            bg="white", fg="red", font=("Arial", 9, "bold"), width=8)
-        stop_btn.grid(row=1, column=5, padx=(0, 15))
+        stop_btn.grid(row=2, column=0, columnspan=2, padx=(0, 15), pady=(5, 0))
         
-        # Status display (spans both rows, expandable)
+        # Status display (spans all rows, expandable)
         self.status_label = tk.Label(control_frame, text="Ready to play! 🎵", 
                                    font=("Arial", 9), fg="green", anchor="w")
-        self.status_label.grid(row=0, column=6, rowspan=2, padx=(15, 0), sticky="nsew")
+        self.status_label.grid(row=0, column=8, rowspan=3, padx=(15, 0), sticky="nsew")
     
     def create_piano_keyboard(self, parent):
         """Create visual Mac keyboard layout."""
@@ -251,9 +278,14 @@ class PianoGUI:
         self.piano_keys = {}
         self._create_mac_keyboard_keys(self.piano_frame)
         
-        # Clear any active key states
+        # Clear any active key states and timers
         self.active_keys.clear()
         self.highlighted_keys.clear()
+        
+        # Cancel all pending key cleanup timers
+        for timer_id in self.key_timers.values():
+            self.root.after_cancel(timer_id)
+        self.key_timers.clear()
     
     def _create_mac_keyboard_keys(self, parent):
         """
@@ -350,17 +382,19 @@ class PianoGUI:
     def on_basetone_change(self, event=None):
         """Handle basetone change."""
         new_basetone = self.basetone_var.get()
+        self.logger.info(f"GUI basetone change requested: {new_basetone}")
         self.piano.set_basetone(new_basetone)
         
         # Update the basetone display
         self.basetone_display_var.set(f"1={new_basetone}")
         
         self.status_label.config(text=f"Basetone changed to: {new_basetone} 🎼", fg="blue")
-        self.root.after(2000, lambda: self.status_label.config(text="Ready to play! 🎵", fg="green"))
+        self.root.after(GUI.STATUS_MESSAGE_DURATION, lambda: self.status_label.config(text="Ready to play! 🎵", fg="green"))
     
     def on_layout_change(self, event=None):
         """Handle layout change."""
         selected_title = self.layout_var.get()
+        self.logger.info(f"GUI layout change requested: {selected_title}")
         
         # Find the selected layout
         for i, layout in enumerate(self.available_layouts):
@@ -379,7 +413,7 @@ class PianoGUI:
                     self._recreate_keyboard()
                     
                     self.status_label.config(text=f"Layout changed to: {selected_title} 🎹", fg="blue")
-                    self.root.after(3000, lambda: self.status_label.config(text="Ready to play! 🎵", fg="green"))
+                    self.root.after(GUI.STATUS_MESSAGE_DURATION, lambda: self.status_label.config(text="Ready to play! 🎵", fg="green"))
                     
                 except Exception as e:
                     self.status_label.config(text=f"Error loading layout: {e} ⚠️", fg="red")
@@ -442,9 +476,46 @@ class PianoGUI:
                              bg="lightgray", font=("Arial", 10))
         close_btn.pack(pady=(0, 10))
     
+    def on_volume_change(self, value=None):
+        """Handle volume change."""
+        new_volume = self.volume_var.get()
+        self.logger.debug(f"GUI volume change: {new_volume:.2f}")
+        self.piano.set_volume(new_volume)
+        
+        # Update volume display
+        self.volume_display_var.set(f"{new_volume:.0%}")
+        
+        self.status_label.config(text=f"Volume: {new_volume:.0%} 🔊", fg="blue")
+        self.root.after(GUI.STATUS_MESSAGE_DURATION, lambda: self.status_label.config(text="Ready to play! 🎵", fg="green"))
+    
+    def volume_up(self):
+        """Increase volume using hotkey."""
+        try:
+            self.piano.volume_up()
+            self.volume_var.set(self.piano.volume)  # Update GUI slider
+            self.volume_display_var.set(f"{self.piano.volume:.0%}")  # Update display
+            self.logger.debug(f"GUI volume increased via hotkey: {self.piano.volume:.2f}")
+            self.status_label.config(text=f"Volume up: {self.piano.volume:.0%} 🔊", fg="blue")
+            self.root.after(GUI.STATUS_MESSAGE_DURATION, lambda: self.status_label.config(text="Ready to play! 🎵", fg="green"))
+        except Exception as e:
+            self.logger.error(f"GUI volume up error: {e}")
+    
+    def volume_down(self):
+        """Decrease volume using hotkey."""
+        try:
+            self.piano.volume_down()
+            self.volume_var.set(self.piano.volume)  # Update GUI slider
+            self.volume_display_var.set(f"{self.piano.volume:.0%}")  # Update display
+            self.logger.debug(f"GUI volume decreased via hotkey: {self.piano.volume:.2f}")
+            self.status_label.config(text=f"Volume down: {self.piano.volume:.0%} 🔉", fg="blue")
+            self.root.after(GUI.STATUS_MESSAGE_DURATION, lambda: self.status_label.config(text="Ready to play! 🎵", fg="green"))
+        except Exception as e:
+            self.logger.error(f"GUI volume down error: {e}")
+    
     def on_instrument_change(self, event=None):
         """Handle instrument change."""
         new_instrument = self.instrument_var.get()
+        self.logger.info(f"GUI instrument change requested: {new_instrument}")
         self.piano.set_instrument(new_instrument)
         
         # Choose appropriate emoji for instrument
@@ -457,22 +528,100 @@ class PianoGUI:
         emoji = instrument_emojis.get(new_instrument, '🎵')
         
         self.status_label.config(text=f"Instrument changed to: {new_instrument.title()} {emoji}", fg="blue")
-        self.root.after(2000, lambda: self.status_label.config(text="Ready to play! 🎵", fg="green"))
+        self.root.after(GUI.STATUS_MESSAGE_DURATION, lambda: self.status_label.config(text="Ready to play! 🎵", fg="green"))
     
     def on_key_press(self, event):
-        """Handle keyboard key press."""
-        key = event.char.lower()
-        if key in self.key_mappings and key not in self.active_keys:
+        """Handle keyboard key press with cross-platform support."""
+        key = event.char.lower() if event.char else ''
+        
+        # Handle empty char (common on Linux/Debian)
+        if not key and hasattr(event, 'keysym'):
+            key = event.keysym.lower()
+            
+        # Normalize special key names
+        if key == 'semicolon':
+            key = ';'
+        elif key == 'apostrophe':
+            key = "'"
+        elif key == 'bracketleft':
+            key = '['
+        elif key == 'bracketright':
+            key = ']'
+        elif key == 'comma':
+            key = ','
+        elif key == 'period':
+            key = '.'
+        elif key == 'slash':
+            key = '/'
+        elif key == 'space':
+            key = ' '
+        elif key == 'plus':
+            key = '+'
+        elif key == 'equal':
+            key = '='
+        elif key == 'minus':
+            key = '-'
+        elif key == 'underscore':
+            key = '_'
+            
+        # Handle volume controls
+        if key in ['+', '=']:
+            self.volume_up()
+            return
+        elif key in ['-', '_']:
+            self.volume_down()
+            return
+            
+        if key in self.key_mappings:
             note = self.key_mappings[key]
+            
+            # Cancel any existing cleanup timer for this key
+            if key in self.key_timers:
+                self.root.after_cancel(self.key_timers[key])
+                del self.key_timers[key]
+            
+            # Always allow key press - remove blocking logic for better responsiveness
             self.active_keys.add(key)
             self.play_note_gui(note)
             self._on_key_press(key)
+            
+            # Set a fallback cleanup timer in case KeyRelease doesn't fire
+            timer_id = self.root.after(self.key_cleanup_delay, lambda: self._cleanup_stuck_key(key))
+            self.key_timers[key] = timer_id
     
     def on_key_release(self, event):
-        """Handle keyboard key release."""
-        key = event.char.lower()
-        if key in self.key_mappings and key in self.active_keys:
-            note = self.key_mappings[key]
+        """Handle keyboard key release with cross-platform support."""
+        key = event.char.lower() if event.char else ''
+        
+        # Handle empty char (common on Linux/Debian) 
+        if not key and hasattr(event, 'keysym'):
+            key = event.keysym.lower()
+            
+        # Normalize special key names (same as key_press)
+        if key == 'semicolon':
+            key = ';'
+        elif key == 'apostrophe':
+            key = "'"
+        elif key == 'bracketleft':
+            key = '['
+        elif key == 'bracketright':
+            key = ']'
+        elif key == 'comma':
+            key = ','
+        elif key == 'period':
+            key = '.'
+        elif key == 'slash':
+            key = '/'
+        elif key == 'space':
+            key = ' '
+            
+        if key in self.key_mappings:
+            # Cancel cleanup timer since we got a proper release event
+            if key in self.key_timers:
+                self.root.after_cancel(self.key_timers[key])
+                del self.key_timers[key]
+                
+            # Remove from active keys and trigger visual release
             self.active_keys.discard(key)
             self._on_key_release(key)
     
@@ -501,36 +650,45 @@ class PianoGUI:
     
     def _on_key_release(self, key):
         """
-        Handle key release (both keyboard and button) with Mac keyboard visual feedback.
+        Handle key release (both keyboard and button) with cross-platform visual feedback.
         
         Args:
             key: The released key identifier
         """
         if key in self.key_mappings:
-            # Add a longer delay before restoring original appearance for better visual feedback
+            # Add a delay before restoring appearance for visual feedback
             def restore_key_appearance():
                 if key in self.piano_keys and key in self.highlighted_keys:
-                    self.highlighted_keys.remove(key)  # Remove from highlighted set
+                    self.highlighted_keys.discard(key)  # Use discard instead of remove to avoid KeyError
                     
-                    # Restore all original properties based on whether it's a piano key
-                    if key in self.key_mappings:
-                        # Piano key restoration
-                        original_bg = "lightgreen"
-                        original_fg = "darkgreen"
-                    else:
-                        # Non-piano key restoration
-                        original_bg = "lightgray"
-                        original_fg = "black"
-                    
+                    # Restore original appearance for piano keys
                     self.piano_keys[key].config(
-                        bg=original_bg,
-                        fg=original_fg,
-                        font=("Arial", 8, "normal"),  # Reset to normal weight
+                        bg="lightgreen",
+                        fg="darkgreen", 
+                        font=("Arial", 8, "normal"),
                         relief="raised"
                     )
             
-            # Delay the restoration by 500ms so user can clearly see the press effect
-            self.root.after(500, restore_key_appearance)
+            # Delay restoration using config value
+            self.root.after(GUI.KEY_HIGHLIGHT_DURATION, restore_key_appearance)
+    
+    def _cleanup_stuck_key(self, key):
+        """Cleanup a key that might be stuck due to missed release events."""
+        if key in self.active_keys:
+            self.active_keys.discard(key)
+            
+        if key in self.key_timers:
+            del self.key_timers[key]
+            
+        # Force visual cleanup for stuck highlighted keys
+        if key in self.highlighted_keys and key in self.piano_keys:
+            self.highlighted_keys.discard(key)
+            self.piano_keys[key].config(
+                bg="lightgreen",
+                fg="darkgreen",
+                font=("Arial", 8, "normal"),
+                relief="raised"
+            )
     
     def on_note_press(self, note):
         """Visual feedback when note is pressed (legacy method for compatibility)."""
@@ -576,9 +734,10 @@ class PianoGUI:
     
     def stop_all(self):
         """Stop all playing sounds."""
+        self.logger.debug("GUI stop all sounds requested")
         self.piano.stop()
         self.status_label.config(text="All sounds stopped 🛑", fg="orange")
-        self.root.after(1500, lambda: self.status_label.config(text="Ready to play! 🎵", fg="green"))
+        self.root.after(GUI.STATUS_MESSAGE_DURATION, lambda: self.status_label.config(text="Ready to play! 🎵", fg="green"))
         
         # Reset all key visuals with proper Mac keyboard colors and fonts
         for key, btn in self.piano_keys.items():
@@ -597,7 +756,12 @@ class PianoGUI:
                     font=("Arial", 8, "normal")
                 )   # Non-piano keys
         self.active_keys.clear()
-        self.highlighted_keys.clear()  # Clear highlighted tracking
+        self.highlighted_keys.clear()
+        
+        # Cancel all pending key cleanup timers
+        for timer_id in self.key_timers.values():
+            self.root.after_cancel(timer_id)
+        self.key_timers.clear()
     
     def run(self):
         """Run the piano GUI."""
@@ -609,7 +773,8 @@ class PianoGUI:
         except KeyboardInterrupt:
             print("\n🛑 Shutting down GUI...")
         finally:
-            self.piano.stop()
+            # Ensure complete cleanup of audio resources
+            self.piano.close()
 
 
 def main():
