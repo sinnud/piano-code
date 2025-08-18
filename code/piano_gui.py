@@ -298,19 +298,31 @@ class PianoGUI:
         keyboard_rows = [
             # Top letter row  
             ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']'],
-            # Middle letter row (main piano keys)
+            # Middle letter row (main piano keys) - will be offset by 0.5 keys
             ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', "'"],
-            # Bottom letter row
+            # Bottom letter row - will be offset by 1 key
             ['z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/']
         ]
         
+        # Calculate total grid width needed (longest row + offset)
+        max_keys = max(len(row) for row in keyboard_rows)
+        total_cols = (max_keys + 1) * 2  # Double for half-key precision
+        
         for row_idx, keys in enumerate(keyboard_rows):
+            # Calculate starting column for this row
+            if row_idx == 0:  # First row - no offset
+                start_col = 0
+            elif row_idx == 1:  # Second row - half key offset  
+                start_col = 1
+            elif row_idx == 2:  # Third row - full key offset
+                start_col = 2
+            
             for col_idx, key in enumerate(keys):
                 # Check if key is mapped to a note
                 is_piano_key = key.lower() in self.key_mappings
                 note_value = self.key_mappings.get(key.lower(), '')
                 
-                        # Create display text
+                # Create display text
                 if is_piano_key:
                     # Use solfege notation that doesn't change with basetone
                     solfege_name = self.SOLFEGE_DISPLAY.get(note_value, note_value)
@@ -335,17 +347,9 @@ class PianoGUI:
                                fg=text_color,
                                activebackground="lightblue")
                 
-                # Add padding for keyboard layout authenticity
-                padx = 2
-                pady = 2
-                if row_idx == 0 and col_idx == 0:  # Tab key area (now first row)
-                    padx = (15, 2)
-                elif row_idx == 1 and col_idx == 0:  # Caps lock area  
-                    padx = (20, 2)
-                elif row_idx == 2 and col_idx == 0:  # Shift key area
-                    padx = (25, 2)
-                
-                btn.grid(row=row_idx, column=col_idx, padx=padx, pady=pady, sticky="nsew")
+                # Grid position: each key takes 2 columns for uniform spacing
+                grid_col = start_col + (col_idx * 2)
+                btn.grid(row=row_idx, column=grid_col, columnspan=2, padx=1, pady=2, sticky="nsew")
                 
                 # Bind events only for piano keys
                 if is_piano_key:
@@ -356,7 +360,7 @@ class PianoGUI:
                 self.piano_keys[key.lower()] = btn
         
         # Configure grid weights for responsive layout
-        for i in range(len(keyboard_rows[0])):
+        for i in range(total_cols):
             parent.columnconfigure(i, weight=1)
         for i in range(len(keyboard_rows)):
             parent.rowconfigure(i, weight=1)
