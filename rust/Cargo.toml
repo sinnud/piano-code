@@ -1,12 +1,21 @@
 [package]
-name = "piano_code"
+name = "piano_sim"
 version = "0.1.0"
 edition = "2021"
+
+[lib]
+name = "piano_code"  # this controls the crate (library) name
+path = "src/lib.rs"
+
+[[bin]]
+name = "piano_sim"
+path = "src/main.rs"
 
 [dependencies]
 # GUI Framework
 eframe = "0.27"
 egui = "0.27"
+
 
 # Audio processing
 rodio = "0.18"

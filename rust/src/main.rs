@@ -24,6 +24,7 @@ impl eframe::App for ErrorApp {
 fn main() -> Result<()> {
     // Initialize logging
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .filter_module("winit", log::LevelFilter::Error) // silence winit warnings
         .init();
     
     log::info!("🎹 Welcome to Piano Code (Rust GUI Mode)!");

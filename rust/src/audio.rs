@@ -14,6 +14,7 @@ pub struct PianoSound {
     duration: f32,
     sample_rate: u32,
     _stream: OutputStream,
+    #[allow(dead_code)]
     stream_handle: OutputStreamHandle,
     sink: Arc<Mutex<Sink>>,
     note_to_semitones: HashMap<String, i32>,
