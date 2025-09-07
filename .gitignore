@@ -38,5 +38,11 @@ htmlcov/
 *.mp3
 *.aiff
 
+# Rust
+/rust/target/
+/rust/Cargo.lock
+/rust/**/*.rs.bk
+/rust/*.pdb
+
 # Claude code
 *.claude
