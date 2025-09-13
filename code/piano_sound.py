@@ -4,7 +4,7 @@ import pyaudio
 import threading
 import logging
 from typing import Optional
-from .config import Audio, Music, config_manager
+from config import Audio, Music, config_manager
 
 
 class PianoSound:
